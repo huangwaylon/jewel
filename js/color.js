@@ -147,8 +147,25 @@
     return out;
   }
 
+  // Punch up a palette derived from a real photo: keep each hue (so it still
+  // reads as the photo) but crank saturation and spread the colors' lightness
+  // apart around the palette mean, plus a mild global contrast curve. The
+  // result has much stronger contrast and more variation between beads.
+  function punchPalette(palette) {
+    const hsl = palette.map((c) => rgbToHsl(c[0], c[1], c[2]));
+    const meanL = hsl.reduce((s, h) => s + h[2], 0) / (hsl.length || 1);
+    return palette.map((c, i) => {
+      let [h, s, l] = hsl[i];
+      s = Math.min(1, s * 1.55 + 0.14);             // vivid
+      l = meanL + (l - meanL) * 1.55;               // spread beads apart in lightness
+      l = 0.5 + (l - 0.5) * 1.15;                   // mild global contrast
+      l = Math.max(0.07, Math.min(0.95, l));
+      return hslToRgb(h, s, l);
+    });
+  }
+
   App.color = {
     rgbToHsl, hslToRgb, rgbCss, mix, dist2,
-    medianCut, mergeSimilar, nearest, jewelize, contrastify, averageColor,
+    medianCut, mergeSimilar, nearest, jewelize, contrastify, punchPalette, averageColor,
   };
 })(window.App = window.App || {});

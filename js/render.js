@@ -6,7 +6,7 @@
   const C = App.color;
 
   const PAD = 14, GAP = 14, TRAY_H = 188;
-  const TRAY_ROWS = 4, TRAY_COLS = 9, TRAY_INSET = 12;
+  const TRAY_ROWS = 4, TRAY_COLS = 18, TRAY_INSET = 12;
 
   function Stage(canvas, game) {
     this.cv = canvas;

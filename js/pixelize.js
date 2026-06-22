@@ -25,20 +25,73 @@
     return quantize(size, raw, samples, { colors, expand: 2, mergeT: 46, contrast: 'spread' });
   }
 
-  // ---- photo → puzzle (up to ~10 colors, keep the real look) ---------------
+  // ---- photo → puzzle (up to ~10 colors, punchy contrast) ------------------
   function pixelizeImage(source, opts) {
     opts = opts || {};
     const size = opts.size || 16, colors = opts.colors || 10, SS = 8, px = size * SS;
     const ctx = makeCanvas(px);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    // cover-crop the largest centered square of the source
-    const sw = source.width, sh = source.height, side = Math.min(sw, sh);
-    ctx.drawImage(source, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, px, px);
+    // Focus on the subject (so a small subject isn't lost in background);
+    // fall back to the largest centered square.
+    const sw = source.width, sh = source.height;
+    let crop = focusCrop(source);
+    if (!crop) { const side = Math.min(sw, sh); crop = { x: (sw - side) / 2, y: (sh - side) / 2, side }; }
+    ctx.drawImage(source, crop.x, crop.y, crop.side, crop.side, 0, 0, px, px);
 
     const { raw, samples } = sampleGrid(ctx, px, size, SS, 0.45);
     if (!samples.length) return null;
-    return quantize(size, raw, samples, { colors, expand: 0, mergeT: 18, contrast: 'natural' });
+    return quantize(size, raw, samples, { colors, expand: 0, mergeT: 14, contrast: 'punch' });
+  }
+
+  // Estimate a square crop around the photo's subject. Treats the border as
+  // background; the subject is the bounding box of pixels that differ from it
+  // (or, for cut-outs, the opaque pixels). Returns null if the subject is
+  // unclear (e.g. a busy scene), so the caller center-crops instead.
+  function focusCrop(source) {
+    const N = 72;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = N;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    try { ctx.drawImage(source, 0, 0, N, N); } catch (e) { return null; }
+    const d = ctx.getImageData(0, 0, N, N).data;
+
+    let br = 0, bg = 0, bb = 0, ba = 0, borderN = 0;
+    const onBorder = (x, y) => x === 0 || y === 0 || x === N - 1 || y === N - 1;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      if (!onBorder(x, y)) continue;
+      borderN++;
+      const i = (y * N + x) * 4, a = d[i + 3] / 255;
+      br += d[i] * a; bg += d[i + 1] * a; bb += d[i + 2] * a; ba += a;
+    }
+    const transparentBorder = ba < borderN * 0.5;
+    const bgC = ba > 0 ? [br / ba, bg / ba, bb / ba] : [0, 0, 0];
+    const T = 3 * 46 * 46;     // per-channel ~46 differs from background
+
+    let minX = N, minY = N, maxX = -1, maxY = -1, fg = 0;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = (y * N + x) * 4, a = d[i + 3] / 255;
+      let isFg = false;
+      if (a > 0.5) {
+        if (transparentBorder) isFg = true;
+        else {
+          const dr = d[i] - bgC[0], dgc = d[i + 1] - bgC[1], db = d[i + 2] - bgC[2];
+          isFg = (dr * dr + dgc * dgc + db * db) > T;
+        }
+      }
+      if (isFg) { fg++; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    }
+    const frac = fg / (N * N);
+    if (fg < 9 || frac < 0.02 || frac > 0.82 || maxX < 0) return null;
+
+    const sw = source.width, sh = source.height, sX = sw / N, sY = sh / N;
+    const x0 = minX * sX, y0 = minY * sY, x1 = (maxX + 1) * sX, y1 = (maxY + 1) * sY;
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    let side = Math.max(x1 - x0, y1 - y0) * 1.35;     // ~35% breathing room
+    side = Math.min(side, sw, sh);
+    const x = Math.max(0, Math.min(cx - side / 2, sw - side));
+    const y = Math.max(0, Math.min(cy - side / 2, sh - side));
+    return { x, y, side };
   }
 
   // ---- shared helpers -------------------------------------------------------
@@ -92,7 +145,9 @@
 
     const usedList = [...new Set(raw.filter((c) => c.on).map((c) => c.ci))];
     const usedColors = usedList.map((ci) => centers[ci]);
-    const palette = opts.contrast === 'spread' ? C.contrastify(usedColors) : usedColors.map(C.jewelize);
+    const palette = opts.contrast === 'spread' ? C.contrastify(usedColors)
+      : opts.contrast === 'punch' ? C.punchPalette(usedColors)
+        : usedColors.map(C.jewelize);
     const remap = new Map();
     usedList.forEach((ci, k) => remap.set(ci, k));
     for (const cell of raw) if (cell.on) { cell.ci = remap.get(cell.ci); delete cell.color; }
