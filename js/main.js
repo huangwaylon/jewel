@@ -92,10 +92,18 @@
     return p;
   }
 
+  // Unified level list: hand-crafted high-contrast art first, then emojis.
+  function levels() {
+    const art = (App.ART || []).map((a) => ({ kind: 'art', a, name: a.name, icon: a.icon }));
+    const emoji = EMOJIS.map((e) => ({ kind: 'emoji', e: e.e, name: e.name, icon: e.e }));
+    return art.concat(emoji);
+  }
+  const LEVELS = levels();
+
   function loadLevel(idx) {
-    levelIdx = (idx % EMOJIS.length + EMOJIS.length) % EMOJIS.length;
-    const meta = EMOJIS[levelIdx];
-    const puzzle = buildPuzzle(meta.e);
+    levelIdx = (idx % LEVELS.length + LEVELS.length) % LEVELS.length;
+    const meta = LEVELS[levelIdx];
+    const puzzle = meta.kind === 'art' ? meta.a.build() : buildPuzzle(meta.e);
     won = false;
     hideWin();
 
@@ -113,7 +121,7 @@
     }
 
     $('level-name').textContent = meta.name;
-    $('level-emoji').textContent = meta.e;
+    $('level-emoji').textContent = meta.icon;
     drawThumb(puzzle);
     updateHUD();
   }
@@ -346,8 +354,8 @@
   }
 
   function showWin() {
-    $('win-emoji').textContent = EMOJIS[levelIdx].e;
-    $('win-name').textContent = EMOJIS[levelIdx].name;
+    $('win-emoji').textContent = LEVELS[levelIdx].icon;
+    $('win-name').textContent = LEVELS[levelIdx].name;
     $('win-overlay').classList.add('show');
   }
   function hideWin() { $('win-overlay').classList.remove('show'); }

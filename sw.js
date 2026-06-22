@@ -1,5 +1,5 @@
 /* sw.js — cache the app shell so Jewel works offline once installed. */
-const CACHE = 'jewel-v4';
+const CACHE = 'jewel-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,7 @@ const ASSETS = [
   './manifest.webmanifest',
   './js/color.js',
   './js/pixelize.js',
+  './js/art.js',
   './js/game.js',
   './js/audio.js',
   './js/render.js',

@@ -405,13 +405,6 @@
       if (dy) this.drawSelGlow(ctx, b.rx, b.ry + dy, this.traySlotR);
       this.drawBead(ctx, b.rx, b.ry + dy, this.traySlotR, this.game.palette[b.ci], 1);
     }
-
-    if (beads.length === 0) {
-      ctx.fillStyle = 'rgba(255,255,255,0.34)';
-      ctx.font = '600 13px system-ui, sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('Tap a color to scoop beads here', tr.x + tr.w / 2, tr.y - GAP / 2 - 1);
-    }
   };
 
   Stage.prototype.drawFlyers = function (ctx, t) {
