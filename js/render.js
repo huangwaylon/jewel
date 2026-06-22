@@ -19,6 +19,10 @@
     this.dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
     this.shake = 0;
     this.winGlow = 0;
+    this.selBoard = new Set();   // selected (risen) board cell indices
+    this.selTray = new Set();    // selected (risen) tray bead objects
+    this.selT0 = 0;
+    this.liftY = 0;
     this._raf = null;
     this._last = 0;
     this._cache = {};          // per-color bead gradient cache (by canvas size)
@@ -80,6 +84,29 @@
     const gy = Math.floor((py - this.by) / this.cell);
     if (gx < 0 || gy < 0 || gx >= this.game.size || gy >= this.game.size) return null;
     return { gx, gy };
+  };
+  Stage.prototype.hitTray = function (px, py) {
+    const t = this.tray;
+    return px >= t.x && py >= t.y && px <= t.x + t.w && py <= t.y + t.h;
+  };
+  // Which tray bead (if any) is under the point.
+  Stage.prototype.hitTrayBead = function (px, py) {
+    const beads = this.game.tray;
+    for (let i = 0; i < beads.length && i < this.trayCap; i++) {
+      const s = this.slotCenter(i);
+      if (Math.hypot(px - s.x, py - s.y) <= this.traySlotR * 1.2) return beads[i];
+    }
+    return null;
+  };
+  // ---- selection (risen beads) ----------------------------------------------
+  Stage.prototype.setSelection = function (boardIdx, trayBeads) {
+    this.selBoard = new Set(boardIdx || []);
+    this.selTray = new Set(trayBeads || []);
+    this.selT0 = this.now();
+  };
+  Stage.prototype.clearSelection = function () {
+    this.selBoard = new Set();
+    this.selTray = new Set();
   };
 
   // ---- spawning -------------------------------------------------------------
@@ -167,6 +194,14 @@
     }
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 60);
     if (this.winGlow > 0) this.winGlow = Math.max(0, this.winGlow - dt * 0.25);
+
+    // Risen-bead lift: quick ramp up then a gentle idle bob.
+    if (this.selBoard.size || this.selTray.size) {
+      const e = Math.min(1, (t - this.selT0) / 150);
+      this.liftY = -this.beadR * 0.5 * (1 - Math.pow(1 - e, 3)) + Math.sin((t - this.selT0) / 230) * -1.6;
+    } else {
+      this.liftY = 0;
+    }
   };
 
   // ---- drawing --------------------------------------------------------------
@@ -224,8 +259,13 @@
         if (!c.on) continue;
         const rc = this.cellRect(gx, gy);
         if (c.cur !== null) {
-          this.drawBead(ctx, rc.cx, rc.cy, this.beadR, g.palette[c.cur], 1);
-          if (c.cur === c.target) this.drawLock(ctx, rc.cx, rc.cy, this.beadR);
+          if (this.selBoard.has(i)) {
+            this.drawSelGlow(ctx, rc.cx, rc.cy + this.liftY, this.beadR);
+            this.drawBead(ctx, rc.cx, rc.cy + this.liftY, this.beadR, g.palette[c.cur], 1);
+          } else {
+            this.drawBead(ctx, rc.cx, rc.cy, this.beadR, g.palette[c.cur], 1);
+            if (c.cur === c.target) this.drawLock(ctx, rc.cx, rc.cy, this.beadR);
+          }
         } else {
           // empty socket + ghost of the target so players know where it goes
           this.drawSocket(ctx, rc.cx, rc.cy, this.beadR);
@@ -235,6 +275,24 @@
         }
       }
     }
+  };
+
+  // A bright halo under a selected (risen) bead.
+  Stage.prototype.drawSelGlow = function (ctx, cx, cy, r) {
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.shadowColor = 'rgba(255,255,255,0.9)';
+    ctx.shadowBlur = r * 0.9;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.fill();
+    ctx.restore();
+    // soft drop shadow on the board where it lifted from
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + r * 1.1, r * 0.55, r * 0.2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fill();
   };
 
   // A settled, "locked" bead: warm rim glow so solved beads read as fixed.
@@ -343,7 +401,9 @@
       const s = this.slotCenter(i);
       if (b.rx == null) { b.rx = s.x; b.ry = s.y; }
       else { b.rx += (s.x - b.rx) * 0.30; b.ry += (s.y - b.ry) * 0.30; }
-      this.drawBead(ctx, b.rx, b.ry, this.traySlotR, this.game.palette[b.ci], 1);
+      const dy = this.selTray.has(b) ? this.liftY : 0;
+      if (dy) this.drawSelGlow(ctx, b.rx, b.ry + dy, this.traySlotR);
+      this.drawBead(ctx, b.rx, b.ry + dy, this.traySlotR, this.game.palette[b.ci], 1);
     }
 
     if (beads.length === 0) {

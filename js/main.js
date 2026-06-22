@@ -62,6 +62,7 @@
   const COLORS = 5;
 
   let game, stage, sfx;
+  let sel = null;       // current selection: {src:'board'|'tray', color, cells?|beads?}
   let levelIdx = 0;
   let won = false;
 
@@ -100,12 +101,14 @@
 
     game = new App.Game(puzzle);
     game.scramble();
+    sel = null;
 
     if (!stage) {
       stage = new App.Stage($('stage'), game);
       stage.start();
     } else {
       stage.game = game;
+      stage.clearSelection();
       stage.resize();
     }
 
@@ -142,106 +145,169 @@
     }, { passive: false });
   }
 
+  // ---- input: two-step select -> target -------------------------------------
+  // First tap lifts a group of beads (rise). Second tap chooses where they go:
+  // the tray, or a matching empty area on the picture.
   function handleTap(px, py) {
     if (won) return;
     const hit = stage.hitCell(px, py);
-    if (!hit) return;
-    const { gx, gy } = hit;
-    const cell = game.cells[game.idx(gx, gy)];
-    if (!cell.on) return;
+    const inTray = stage.hitTray(px, py);
 
-    if (cell.cur !== null) {
-      const clump = game.selectClump(gx, gy);
-      if (clump && clump.cells.length) collect(clump, px, py);
-      else { stage.ring(gx, gy); sfx.tick(); }   // locked bead — gentle ack
-    } else {
-      const hole = game.selectHole(gx, gy);
-      if (hole && game.bagCount(hole.target) > 0) {
-        place(hole, gx, gy);
-      } else {
-        // nothing matching to pour here
-        stage.kick(7); sfx.reject();
-        stage.ring(gx, gy);
+    if (!sel) {
+      if (hit) startBoardSelection(hit);
+      else if (inTray) startTraySelection(px, py);
+      return;
+    }
+
+    if (sel.src === 'board') {
+      if (inTray) return commitBoardToTray();
+      if (hit) {
+        const c = game.cells[game.idx(hit.gx, hit.gy)];
+        if (c.on && c.cur === null && !c.pending && c.target === sel.color) return commitBoardToHole(hit);
+        if (c.on && c.cur !== null) {                       // tapped a bead
+          if (sel.set.has(game.idx(hit.gx, hit.gy))) return deselect();  // same group → drop
+          const clump = game.selectClump(hit.gx, hit.gy);
+          if (clump) return setBoardSelection(clump);
+          deselect(); stage.ring(hit.gx, hit.gy); sfx.tick(); return;     // locked
+        }
       }
+      return deselect();
+    }
+
+    if (sel.src === 'tray') {
+      if (hit) {
+        const c = game.cells[game.idx(hit.gx, hit.gy)];
+        if (c.on && c.cur === null && !c.pending && c.target === sel.color) return commitTrayToHole(hit);
+        return deselect();
+      }
+      if (inTray) {
+        const bead = stage.hitTrayBead(px, py);
+        if (bead && bead.ci !== sel.color) return setTraySelection(bead.ci);
+        return deselect();                                  // same color / empty area
+      }
+      return deselect();
     }
   }
 
-  // ---- collect: beads fly from board into the tray slots --------------------
-  function collect(clump, tapX, tapY) {
-    const free = game.trayFree();
-    if (free <= 0) { stage.kick(7); sfx.reject(); return; }   // tray is full
-
-    const col = game.palette[clump.color];
-    // ripple out from the tapped point
-    let ordered = clump.cells.map((c) => {
-      const rc = stage.cellRect(c.gx, c.gy);
-      return { c, rc, d: Math.hypot(rc.cx - tapX, rc.cy - tapY) };
-    }).sort((a, b) => a.d - b.d);
-    if (ordered.length > free) ordered = ordered.slice(0, free); // only what fits
-
+  function startBoardSelection(hit) {
+    const clump = game.selectClump(hit.gx, hit.gy);
+    if (clump) setBoardSelection(clump);
+    else { stage.ring(hit.gx, hit.gy); sfx.tick(); }        // empty or locked
+  }
+  function setBoardSelection(clump) {
+    sel = { src: 'board', color: clump.color, cells: clump.cells, set: new Set(clump.cells.map((c) => c.i)) };
+    stage.setSelection(sel.cells.map((c) => c.i), null);
     stage.ring(clump.cells[0].gx, clump.cells[0].gy);
-    sfx.scoop(ordered.length);
+    sfx.lift();
+  }
+  function startTraySelection(px, py) {
+    const bead = stage.hitTrayBead(px, py);
+    if (bead) setTraySelection(bead.ci);
+  }
+  function setTraySelection(color) {
+    const beads = game.tray.filter((b) => b.ci === color);
+    if (!beads.length) return;
+    sel = { src: 'tray', color, beads };
+    stage.setSelection(null, beads);
+    sfx.lift();
+  }
+  function deselect() { sel = null; stage.clearSelection(); }
 
-    const base = game.bagTotal();   // first free slot index
+  // ---- commits ---------------------------------------------------------------
+  // Selected board beads → the tray (however many slots are free).
+  function commitBoardToTray() {
+    const free = game.trayFree();
+    if (free <= 0) { stage.kick(7); sfx.reject(); return; } // keep selection, try a hole instead
+
+    const tc = { x: stage.tray.x + stage.tray.w / 2, y: stage.tray.y };
+    let ordered = sel.cells.map((c) => {
+      const rc = stage.cellRect(c.gx, c.gy);
+      return { c, rc, d: Math.hypot(rc.cx - tc.x, rc.cy - tc.y) };
+    }).sort((a, b) => a.d - b.d);
+    if (ordered.length > free) ordered = ordered.slice(0, free);
+
+    const color = sel.color, base = game.bagTotal();
+    const palCol = game.palette[color];
+    sfx.scoop(ordered.length);
     ordered.forEach((o, k) => {
-      game.liftCell(o.c.i);                     // board shows empty immediately
+      game.liftCell(o.c.i);
       const slot = stage.slotCenter(base + k);
       stage.spawnFlyer({
-        color: col,
-        x0: o.rc.cx, y0: o.rc.cy,
-        x1: slot.x, y1: slot.y,
-        delay: k * 28, dur: 300 + Math.min(180, o.d),
-        r0: stage.beadR, r1: stage.traySlotR,
-        arc: -stage.cell * 1.1,
-        onLand: () => {
-          const b = game.trayPush(clump.color);  // bead lands in its slot
-          b.rx = slot.x; b.ry = slot.y;
-          sfx.tick(); updateHUD();
-        },
+        color: palCol, x0: o.rc.cx, y0: o.rc.cy, x1: slot.x, y1: slot.y,
+        delay: k * 28, dur: 300 + Math.min(180, o.d), r0: stage.beadR, r1: stage.traySlotR, arc: -stage.cell * 1.1,
+        onLand: () => { const b = game.trayPush(color); b.rx = slot.x; b.ry = slot.y; sfx.tick(); updateHUD(); },
       });
     });
-    updateHUD();
+    deselect(); updateHUD();
   }
 
-  // ---- place: beads fly from tray slots into matching empty cells -----------
-  function place(hole, gx, gy) {
-    const col = game.palette[hole.target];
-    const avail = game.bagCount(hole.target);
-    // nearest empty cells to the tap, up to what we hold
-    const tx = stage.cellRect(gx, gy).cx, ty = stage.cellRect(gx, gy).cy;
-    const targets = hole.cells.map((c) => {
-      const rc = stage.cellRect(c.gx, c.gy);
-      return { c, rc, d: Math.hypot(rc.cx - tx, rc.cy - ty) };
-    }).sort((a, b) => a.d - b.d).slice(0, avail);
+  // Selected board beads → straight into a matching empty area (board → board).
+  function commitBoardToHole(hit) {
+    const hole = game.selectHole(hit.gx, hit.gy);
+    if (!hole) return deselect();
+    const tx = stage.cellRect(hit.gx, hit.gy).cx, ty = stage.cellRect(hit.gx, hit.gy).cy;
+    const color = sel.color, palCol = game.palette[color];
 
-    const n = targets.length;
-    const removed = game.trayRemove(hole.target, n);   // pulled out of slots now
-    targets.forEach((o) => game.reserve(o.c.i));
+    const src = sel.cells.map((c) => ({ c, rc: stage.cellRect(c.gx, c.gy) }))
+      .sort((a, b) => Math.hypot(a.rc.cx - tx, a.rc.cy - ty) - Math.hypot(b.rc.cx - tx, b.rc.cy - ty));
+    const dst = hole.cells.map((c) => ({ c, rc: stage.cellRect(c.gx, c.gy) }))
+      .sort((a, b) => Math.hypot(a.rc.cx - tx, a.rc.cy - ty) - Math.hypot(b.rc.cx - tx, b.rc.cy - ty));
+    const n = Math.min(src.length, dst.length);
+
     sfx.pour(n);
-
     let remaining = n;
-    targets.forEach((o, k) => {
-      const src = removed[k];
-      const sx = (src && src.rx != null) ? src.rx : stage.tray.x + stage.tray.w / 2;
-      const sy = (src && src.ry != null) ? src.ry : stage.tray.y + stage.tray.h / 2;
+    for (let k = 0; k < n; k++) {
+      const s = src[k], d = dst[k];
+      game.liftCell(s.c.i); game.reserve(d.c.i);
       stage.spawnFlyer({
-        color: col,
-        x0: sx, y0: sy,
-        x1: o.rc.cx, y1: o.rc.cy,
-        delay: k * 34, dur: 320 + Math.min(160, o.d),
-        r0: stage.traySlotR, r1: stage.beadR,
-        arc: -stage.cell * 1.0,
+        color: palCol, x0: s.rc.cx, y0: s.rc.cy, x1: d.rc.cx, y1: d.rc.cy,
+        delay: k * 30, dur: 300 + Math.min(180, Math.hypot(d.rc.cx - s.rc.cx, d.rc.cy - s.rc.cy)),
+        arc: -stage.cell * 1.1,
         onLand: () => {
-          game.fillCell(o.c.i, hole.target);
-          stage.burst(o.rc.cx, o.rc.cy, col, 5);
-          stage.ring(o.c.gx, o.c.gy);
-          sfx.plink();
-          updateHUD();
+          game.fillCell(d.c.i, color);
+          stage.burst(d.rc.cx, d.rc.cy, palCol, 5);
+          stage.ring(d.c.gx, d.c.gy);
+          sfx.plink(); updateHUD();
           if (--remaining === 0) checkWin();
         },
       });
-    });
-    updateHUD();
+    }
+    deselect(); updateHUD();
+  }
+
+  // Selected tray beads → a matching empty area (however many fit).
+  function commitTrayToHole(hit) {
+    const hole = game.selectHole(hit.gx, hit.gy);
+    if (!hole) return deselect();
+    const color = sel.color, palCol = game.palette[color];
+    const tx = stage.cellRect(hit.gx, hit.gy).cx, ty = stage.cellRect(hit.gx, hit.gy).cy;
+
+    const targets = hole.cells.map((c) => ({ c, rc: stage.cellRect(c.gx, c.gy) }))
+      .sort((a, b) => Math.hypot(a.rc.cx - tx, a.rc.cy - ty) - Math.hypot(b.rc.cx - tx, b.rc.cy - ty));
+    const n = Math.min(game.bagCount(color), targets.length);
+    const removed = game.trayRemove(color, n);
+
+    sfx.pour(n);
+    let remaining = n;
+    for (let k = 0; k < n; k++) {
+      const o = targets[k], srcB = removed[k];
+      const sx = (srcB && srcB.rx != null) ? srcB.rx : stage.tray.x + stage.tray.w / 2;
+      const sy = (srcB && srcB.ry != null) ? srcB.ry : stage.tray.y + stage.tray.h / 2;
+      game.reserve(o.c.i);
+      stage.spawnFlyer({
+        color: palCol, x0: sx, y0: sy, x1: o.rc.cx, y1: o.rc.cy,
+        delay: k * 34, dur: 320 + Math.min(160, Math.hypot(o.rc.cx - sx, o.rc.cy - sy)),
+        r0: stage.traySlotR, r1: stage.beadR, arc: -stage.cell * 1.0,
+        onLand: () => {
+          game.fillCell(o.c.i, color);
+          stage.burst(o.rc.cx, o.rc.cy, palCol, 5);
+          stage.ring(o.c.gx, o.c.gy);
+          sfx.plink(); updateHUD();
+          if (--remaining === 0) checkWin();
+        },
+      });
+    }
+    deselect(); updateHUD();
   }
 
   function checkWin() {

@@ -119,55 +119,55 @@
     return out;
   };
 
-  // ---- scramble (conserves color counts → always solvable) -----------------
+  // ---- scramble -------------------------------------------------------------
+  // Shuffle the beads (conserves counts → always solvable) and then repair
+  // fixed points so NO bead starts on its target cell: every bead is movable
+  // from the start. (Possible only because pixelize caps any color at <=~50%.)
   Game.prototype.scramble = function (rng) {
     rng = rng || Math.random;
-    const on = [];
-    for (let gy = 0; gy < this.size; gy++) for (let gx = 0; gx < this.size; gx++) {
-      const i = this.idx(gx, gy);
-      if (this.cells[i].on) on.push({ gx, gy, i });
-    }
-    if (on.length < 2) return;
+    const idx = [];
+    for (let i = 0; i < this.cells.length; i++) if (this.cells[i].on) idx.push(i);
+    if (idx.length < 2) return;
 
-    const blobAround = (seed, size) => {
-      const seen = new Set([seed.i]);
-      const blob = [seed];
-      const frontier = [seed];
-      while (blob.length < size && frontier.length) {
-        const cur = frontier.splice((rng() * frontier.length) | 0, 1)[0];
-        const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-        for (const [dx, dy] of nb) {
-          const nx = cur.gx + dx, ny = cur.gy + dy;
-          if (!this.inBounds(nx, ny)) continue;
-          const ni = this.idx(nx, ny);
-          if (seen.has(ni) || !this.cells[ni].on) continue;
-          seen.add(ni);
-          const node = { gx: nx, gy: ny, i: ni };
-          blob.push(node); frontier.push(node);
-          if (blob.length >= size) break;
+    // Fisher-Yates shuffle of the bead colors across the cells.
+    const beads = idx.map((i) => this.cells[i].target);
+    for (let k = beads.length - 1; k > 0; k--) {
+      const j = (rng() * (k + 1)) | 0;
+      const t = beads[k]; beads[k] = beads[j]; beads[j] = t;
+    }
+    for (let k = 0; k < idx.length; k++) this.cells[idx[k]].cur = beads[k];
+
+    this._removeFixedPoints(idx, rng);
+  };
+
+  // Swap-repair: for each cell still showing its target color, find a partner
+  // swap that un-fixes it without creating a new fixed point (prefer a partner
+  // that is itself fixed, killing two at once).
+  Game.prototype._removeFixedPoints = function (idx, rng) {
+    const cells = this.cells;
+    for (let pass = 0; pass < 12; pass++) {
+      const fixed = idx.filter((i) => cells[i].cur === cells[i].target);
+      if (fixed.length === 0) break;
+      let progressed = false;
+      for (const i of fixed) {
+        if (cells[i].cur !== cells[i].target) continue;     // already repaired
+        const ci = cells[i].cur, ti = cells[i].target;
+        let cand = -1, candFixed = -1;
+        for (const j of idx) {
+          if (j === i) continue;
+          const cj = cells[j].cur, tj = cells[j].target;
+          if (cj !== ti && ci !== tj) {                     // safe swap
+            if (cj === tj) { candFixed = j; break; }        // j also fixed → ideal
+            if (cand < 0) cand = j;
+          }
+        }
+        const j = candFixed >= 0 ? candFixed : cand;
+        if (j >= 0) {
+          cells[i].cur = cells[j].cur; cells[j].cur = ci;
+          progressed = true;
         }
       }
-      return blob;
-    };
-
-    const rounds = Math.max(10, Math.round(on.length / 4));
-    for (let r = 0; r < rounds; r++) {
-      const a = on[(rng() * on.length) | 0];
-      const b = on[(rng() * on.length) | 0];
-      const size = 2 + ((rng() * 6) | 0);
-      const ba = blobAround(a, size);
-      const bb = blobAround(b, size);
-      const m = Math.min(ba.length, bb.length);
-      for (let k = 0; k < m; k++) {
-        const t = this.cells[ba[k].i].cur;
-        this.cells[ba[k].i].cur = this.cells[bb[k].i].cur;
-        this.cells[bb[k].i].cur = t;
-      }
-    }
-    // Guarantee it doesn't come out already solved.
-    if (this.isWon()) {
-      const a = on[0], b = on[on.length - 1];
-      const t = this.cells[a.i].cur; this.cells[a.i].cur = this.cells[b.i].cur; this.cells[b.i].cur = t;
+      if (!progressed) break;
     }
   };
 

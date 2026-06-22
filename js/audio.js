@@ -63,6 +63,8 @@
 
   Audio.prototype.scoop = function (n) { this.glide(280, 620, 0.18, 'triangle', 0.18); };
   Audio.prototype.pour = function (n) { this.glide(620, 360, 0.16, 'sine', 0.16); };
+  // soft lift when a group of beads rises on selection
+  Audio.prototype.lift = function () { this.blip(660, 0.09, 'sine', 0.13); };
 
   // soft ticks as beads land in the tray (rate-limited, rising pitch)
   Audio.prototype.tick = function () {

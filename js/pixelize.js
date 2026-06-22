@@ -68,23 +68,67 @@
         .map((x) => x.c);
     }
 
-    // Assign each cell to its nearest ORIGINAL center, then build a
-    // high-contrast display palette (same index order) for the beads.
-    for (const cell of raw) {
-      if (cell.on) { cell.ci = C.nearest(centers, cell.color); delete cell.color; }
-    }
-    const palette = C.contrastify(centers);
+    // Assign each cell to its nearest ORIGINAL center (keep cell.color around
+    // for the dominance step below).
+    for (const cell of raw) if (cell.on) cell.ci = C.nearest(centers, cell.color);
 
-    // Drop any palette colors that ended up unused, and reindex.
-    const used = new Set(raw.filter(c => c.on).map(c => c.ci));
+    // Cap any single color to <= MAX_SHARE of the cells, so the scramble can
+    // leave NO bead on its target cell. Split a too-dominant color in two by
+    // brightness, then merge the smallest pair back down to stay within budget.
+    capDominance(raw.filter((c) => c.on), centers, MAX_SHARE, colors);
+
+    // Build a high-contrast display palette from just the colors actually used.
+    const usedList = [...new Set(raw.filter((c) => c.on).map((c) => c.ci))];
+    const contrast = C.contrastify(usedList.map((ci) => centers[ci]));
     const remap = new Map();
-    const finalPalette = [];
-    for (let i = 0; i < palette.length; i++) {
-      if (used.has(i)) { remap.set(i, finalPalette.length); finalPalette.push(palette[i]); }
-    }
-    for (const cell of raw) if (cell.on) cell.ci = remap.get(cell.ci);
+    usedList.forEach((ci, k) => remap.set(ci, k));
+    for (const cell of raw) if (cell.on) { cell.ci = remap.get(cell.ci); delete cell.color; }
 
-    return { size, palette: finalPalette, cells: raw };
+    return { size, palette: contrast, cells: raw };
+  }
+
+  const MAX_SHARE = 0.46;
+  const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+
+  function recompCenter(centers, onCells, ci) {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (const c of onCells) if (c.ci === ci) { r += c.color[0]; g += c.color[1]; b += c.color[2]; n++; }
+    if (n > 0) centers[ci] = [r / n, g / n, b / n];
+  }
+
+  function capDominance(onCells, centers, maxFrac, maxColors) {
+    const total = onCells.length;
+    for (let iter = 0; iter < 6; iter++) {
+      const count = {};
+      for (const c of onCells) count[c.ci] = (count[c.ci] || 0) + 1;
+      let dom = -1, domN = 0;
+      for (const k in count) if (count[k] > domN) { domN = count[k]; dom = +k; }
+      if (domN <= maxFrac * total) break;
+
+      // split the dominant cluster in half by brightness
+      const grp = onCells.filter((c) => c.ci === dom).sort((a, b) => lum(a.color) - lum(b.color));
+      const ni = centers.length; centers.push([0, 0, 0]);
+      for (let x = grp.length >> 1; x < grp.length; x++) grp[x].ci = ni;
+      recompCenter(centers, onCells, dom);
+      recompCenter(centers, onCells, ni);
+
+      // merge smallest pairs to stay within the color budget
+      let usedKeys = [...new Set(onCells.map((c) => c.ci))];
+      while (usedKeys.length > maxColors) {
+        const cnt = {};
+        for (const c of onCells) cnt[c.ci] = (cnt[c.ci] || 0) + 1;
+        let bi = -1, bj = -1, best = Infinity, fbi = -1, fbj = -1, fbest = Infinity;
+        for (let a = 0; a < usedKeys.length; a++) for (let b = a + 1; b < usedKeys.length; b++) {
+          const ka = usedKeys[a], kb = usedKeys[b], comb = cnt[ka] + cnt[kb];
+          if (comb < fbest) { fbest = comb; fbi = ka; fbj = kb; }
+          if (comb <= maxFrac * total && comb < best) { best = comb; bi = ka; bj = kb; }
+        }
+        if (bi < 0) { bi = fbi; bj = fbj; }       // fallback if none stays under cap
+        for (const c of onCells) if (c.ci === bj) c.ci = bi;
+        recompCenter(centers, onCells, bi);
+        usedKeys = [...new Set(onCells.map((c) => c.ci))];
+      }
+    }
   }
 
   App.pixelize = pixelize;
