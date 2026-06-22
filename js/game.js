@@ -55,12 +55,20 @@
 
   // ---- smart selection ------------------------------------------------------
   // Connected run of cells currently showing the same color as (gx,gy).
+  // Correctly-placed beads (cur === target) are locked: they can't be picked
+  // up and act as walls, so a clump never includes them.
   Game.prototype.selectClump = function (gx, gy) {
     const start = this.idx(gx, gy);
     const cell = this.cells[start];
     if (!cell.on || cell.cur === null || cell.pending) return null;
+    if (cell.cur === cell.target) return null;   // locked in place
     const color = cell.cur;
-    return { color, cells: this._flood(gx, gy, (c) => c.cur === color && !c.pending) };
+    return { color, cells: this._flood(gx, gy, (c) => c.cur === color && !c.pending && c.cur !== c.target) };
+  };
+
+  Game.prototype.isLocked = function (i) {
+    const c = this.cells[i];
+    return c.on && c.cur !== null && c.cur === c.target;
   };
 
   // Connected run of EMPTY cells that share the same target color as (gx,gy).

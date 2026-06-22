@@ -9,7 +9,7 @@
   function pixelize(emoji, opts) {
     opts = opts || {};
     const size = opts.size || 16;       // grid is size x size
-    const colors = opts.colors || 7;    // target palette count
+    const colors = opts.colors || 5;    // target palette count (<= 5)
     const SS = 10;                      // supersample pixels per cell
     const px = size * SS;
 
@@ -53,14 +53,27 @@
 
     if (samples.length === 0) return null;
 
-    // Quantize the cell colors, then merge near-duplicates.
-    let palette = C.medianCut(samples, colors);
-    palette = C.mergeSimilar(palette, 16 * 16); // merge if within ~16 per channel
-    palette = palette.map(C.jewelize);
-
-    for (const cell of raw) {
-      if (cell.on) { cell.ci = C.nearest(palette, cell.color); delete cell.color; }
+    // Cluster the cell colors, then merge near-identical shades so we spend our
+    // (<=5) color slots on genuinely different colors rather than 5 reds.
+    let centers = C.medianCut(samples, colors + 2);
+    centers = C.mergeSimilar(centers, 46 * 46);   // collapse within ~46/channel
+    if (centers.length > colors) {
+      // keep the `colors` most populous clusters
+      const pop = centers.map(() => 0);
+      for (const c of samples) pop[C.nearest(centers, c)]++;
+      centers = centers
+        .map((c, i) => ({ c, n: pop[i] }))
+        .sort((a, b) => b.n - a.n)
+        .slice(0, colors)
+        .map((x) => x.c);
     }
+
+    // Assign each cell to its nearest ORIGINAL center, then build a
+    // high-contrast display palette (same index order) for the beads.
+    for (const cell of raw) {
+      if (cell.on) { cell.ci = C.nearest(centers, cell.color); delete cell.color; }
+    }
+    const palette = C.contrastify(centers);
 
     // Drop any palette colors that ended up unused, and reindex.
     const used = new Set(raw.filter(c => c.on).map(c => c.ci));

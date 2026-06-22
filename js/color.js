@@ -122,8 +122,33 @@
     return hslToRgb(h, s, l);
   }
 
+  // Pull a palette apart so every bead is easy to tell from every other one.
+  // Emoji are often one hue with subtle shading (a strawberry is ~5 reds); we
+  // rank the colors by brightness and spread them across a wide lightness band,
+  // crank saturation, and nudge near-identical hues apart. The result reads as
+  // distinct candy beads even when the source colors were nearly the same.
+  function contrastify(palette) {
+    const n = palette.length;
+    if (n <= 1) {
+      const c = palette[0] || [200, 120, 160];
+      let [h, s] = rgbToHsl(c[0], c[1], c[2]);
+      return [hslToRgb(h, Math.min(1, s * 1.4 + 0.3), 0.6)];
+    }
+    const hsl = palette.map((c) => rgbToHsl(c[0], c[1], c[2]));
+    const order = hsl.map((h, i) => [h[2], i]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+    const LO = 0.34, HI = 0.78;
+    const out = palette.slice();
+    order.forEach((idx, k) => {
+      let [h, s] = hsl[idx];
+      const l = LO + (HI - LO) * (k / (n - 1));        // even brightness steps
+      s = Math.min(1, s * 1.5 + 0.30);                  // vivid
+      out[idx] = hslToRgb(h, s, l);
+    });
+    return out;
+  }
+
   App.color = {
     rgbToHsl, hslToRgb, rgbCss, mix, dist2,
-    medianCut, mergeSimilar, nearest, jewelize, averageColor,
+    medianCut, mergeSimilar, nearest, jewelize, contrastify, averageColor,
   };
 })(window.App = window.App || {});

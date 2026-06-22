@@ -22,10 +22,44 @@
     { e: '👾', name: 'Alien' },
     { e: '🌼', name: 'Daisy' },
     { e: '🦀', name: 'Crab' },
+    { e: '🍋', name: 'Lemon' },
+    { e: '🍊', name: 'Orange' },
+    { e: '🍒', name: 'Cherries' },
+    { e: '🍑', name: 'Peach' },
+    { e: '🍇', name: 'Grapes' },
+    { e: '🥝', name: 'Kiwi' },
+    { e: '🫐', name: 'Blueberries' },
+    { e: '🥑', name: 'Avocado' },
+    { e: '🌻', name: 'Sunflower' },
+    { e: '🌷', name: 'Tulip' },
+    { e: '🍀', name: 'Clover' },
+    { e: '🐱', name: 'Cat' },
+    { e: '🐶', name: 'Dog' },
+    { e: '🦊', name: 'Fox' },
+    { e: '🐸', name: 'Frog' },
+    { e: '🐬', name: 'Dolphin' },
+    { e: '🦄', name: 'Unicorn' },
+    { e: '🐧', name: 'Penguin' },
+    { e: '🐞', name: 'Ladybug' },
+    { e: '🦉', name: 'Owl' },
+    { e: '🌙', name: 'Moon' },
+    { e: '☀️', name: 'Sun' },
+    { e: '❤️', name: 'Heart' },
+    { e: '🔥', name: 'Fire' },
+    { e: '⚡', name: 'Bolt' },
+    { e: '🎈', name: 'Balloon' },
+    { e: '🍩', name: 'Donut' },
+    { e: '🧁', name: 'Cupcake' },
+    { e: '🍭', name: 'Lollipop' },
+    { e: '🎀', name: 'Bow' },
+    { e: '🌴', name: 'Palm Tree' },
+    { e: '🚀', name: 'Rocket' },
+    { e: '⚽', name: 'Soccer Ball' },
+    { e: '🪼', name: 'Jellyfish' },
   ];
 
   const GRID = 16;
-  const COLORS = 7;
+  const COLORS = 5;
 
   let game, stage, sfx;
   let levelIdx = 0;
@@ -119,6 +153,7 @@
     if (cell.cur !== null) {
       const clump = game.selectClump(gx, gy);
       if (clump && clump.cells.length) collect(clump, px, py);
+      else { stage.ring(gx, gy); sfx.tick(); }   // locked bead — gentle ack
     } else {
       const hole = game.selectHole(gx, gy);
       if (hole && game.bagCount(hole.target) > 0) {

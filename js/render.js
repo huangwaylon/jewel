@@ -212,6 +212,7 @@
         const rc = this.cellRect(gx, gy);
         if (c.cur !== null) {
           this.drawBead(ctx, rc.cx, rc.cy, this.beadR, g.palette[c.cur], 1);
+          if (c.cur === c.target) this.drawLock(ctx, rc.cx, rc.cy, this.beadR);
         } else {
           // empty socket + ghost of the target so players know where it goes
           this.drawSocket(ctx, rc.cx, rc.cy, this.beadR);
@@ -223,8 +224,19 @@
     }
   };
 
-  Stage.prototype.drawSocket = function (ctx, cx, cy, r) {
+  // A settled, "locked" bead: warm rim glow so solved beads read as fixed.
+  Stage.prototype.drawLock = function (ctx, cx, cy, r) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(1.5, r * 0.12);
+    ctx.strokeStyle = 'rgba(255,221,140,0.9)';
     ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.96, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  Stage.prototype.drawSocket = function (ctx, cx, cy, r) {    ctx.beginPath();
     ctx.arc(cx, cy, r * 0.92, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.fill();
