@@ -166,38 +166,46 @@
     }
   }
 
-  // ---- collect: beads fly from board into the tray --------------------------
+  // ---- collect: beads fly from board into the tray slots --------------------
   function collect(clump, tapX, tapY) {
+    const free = game.trayFree();
+    if (free <= 0) { stage.kick(7); sfx.reject(); return; }   // tray is full
+
     const col = game.palette[clump.color];
-    const pile = stage.pilePos(clump.color);
     // ripple out from the tapped point
-    const ordered = clump.cells.map((c) => {
+    let ordered = clump.cells.map((c) => {
       const rc = stage.cellRect(c.gx, c.gy);
       return { c, rc, d: Math.hypot(rc.cx - tapX, rc.cy - tapY) };
     }).sort((a, b) => a.d - b.d);
+    if (ordered.length > free) ordered = ordered.slice(0, free); // only what fits
 
     stage.ring(clump.cells[0].gx, clump.cells[0].gy);
     sfx.scoop(ordered.length);
 
+    const base = game.bagTotal();   // first free slot index
     ordered.forEach((o, k) => {
       game.liftCell(o.c.i);                     // board shows empty immediately
+      const slot = stage.slotCenter(base + k);
       stage.spawnFlyer({
         color: col,
         x0: o.rc.cx, y0: o.rc.cy,
-        x1: pile.x + (Math.random() - 0.5) * 10, y1: pile.y - 4,
+        x1: slot.x, y1: slot.y,
         delay: k * 28, dur: 300 + Math.min(180, o.d),
-        r0: stage.beadR, r1: Math.min(stage.beadR, 13),
+        r0: stage.beadR, r1: stage.traySlotR,
         arc: -stage.cell * 1.1,
-        onLand: () => { game.bagAdd(clump.color, 1); sfx.tick(); updateHUD(); },
+        onLand: () => {
+          const b = game.trayPush(clump.color);  // bead lands in its slot
+          b.rx = slot.x; b.ry = slot.y;
+          sfx.tick(); updateHUD();
+        },
       });
     });
     updateHUD();
   }
 
-  // ---- place: beads pour from the tray into matching empty cells ------------
+  // ---- place: beads fly from tray slots into matching empty cells -----------
   function place(hole, gx, gy) {
     const col = game.palette[hole.target];
-    const pile = stage.pilePos(hole.target);
     const avail = game.bagCount(hole.target);
     // nearest empty cells to the tap, up to what we hold
     const tx = stage.cellRect(gx, gy).cx, ty = stage.cellRect(gx, gy).cy;
@@ -207,18 +215,21 @@
     }).sort((a, b) => a.d - b.d).slice(0, avail);
 
     const n = targets.length;
-    game.bagTake(hole.target, n);
+    const removed = game.trayRemove(hole.target, n);   // pulled out of slots now
     targets.forEach((o) => game.reserve(o.c.i));
     sfx.pour(n);
 
     let remaining = n;
     targets.forEach((o, k) => {
+      const src = removed[k];
+      const sx = (src && src.rx != null) ? src.rx : stage.tray.x + stage.tray.w / 2;
+      const sy = (src && src.ry != null) ? src.ry : stage.tray.y + stage.tray.h / 2;
       stage.spawnFlyer({
         color: col,
-        x0: pile.x + (Math.random() - 0.5) * 10, y0: pile.y - 4,
+        x0: sx, y0: sy,
         x1: o.rc.cx, y1: o.rc.cy,
         delay: k * 34, dur: 320 + Math.min(160, o.d),
-        r0: Math.min(stage.beadR, 13), r1: stage.beadR,
+        r0: stage.traySlotR, r1: stage.beadR,
         arc: -stage.cell * 1.0,
         onLand: () => {
           game.fillCell(o.c.i, hole.target);
@@ -281,4 +292,5 @@
   });
 
   App.game = () => game;   // handy for console debugging
+  App.stage = () => stage;
 })(window.App = window.App || {});

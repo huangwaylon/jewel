@@ -1,5 +1,5 @@
 /* sw.js — cache the app shell so Jewel works offline once installed. */
-const CACHE = 'jewel-v2';
+const CACHE = 'jewel-v3';
 const ASSETS = [
   './',
   './index.html',

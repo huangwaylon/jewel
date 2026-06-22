@@ -17,7 +17,8 @@
       this.cells[i].target = c.ci;
       this.cells[i].cur = c.ci;       // start solved; scramble() messes it up
     }
-    this.bag = new Map();             // ci -> count held in tray
+    this.tray = [];                   // ordered bead objects { ci } held in the tray
+    this.trayCap = Infinity;          // slot count; set by the view (3 rows x cols)
     this.onCount = this.cells.filter(c => c.on).length;
   }
 
@@ -26,20 +27,23 @@
     return gx >= 0 && gy >= 0 && gx < this.size && gy < this.size;
   };
 
-  // ---- bag ------------------------------------------------------------------
-  Game.prototype.bagAdd = function (ci, n) {
-    this.bag.set(ci, (this.bag.get(ci) || 0) + (n || 1));
+  // ---- tray -----------------------------------------------------------------
+  // The tray is a fixed grid of slots that fills with real beads. We keep an
+  // ordered array; the view draws bead i in slot i and reflows on removal.
+  Game.prototype.trayFree = function () { return Math.max(0, this.trayCap - this.tray.length); };
+  Game.prototype.trayPush = function (ci) { const b = { ci }; this.tray.push(b); return b; };
+  // Remove up to n beads of color ci (trailing-first to minimize reflow); return them.
+  Game.prototype.trayRemove = function (ci, n) {
+    const out = [];
+    for (let i = this.tray.length - 1; i >= 0 && out.length < n; i--) {
+      if (this.tray[i].ci === ci) { out.push(this.tray[i]); this.tray.splice(i, 1); }
+    }
+    return out;
   };
-  Game.prototype.bagTake = function (ci, n) {
-    const have = this.bag.get(ci) || 0;
-    const take = Math.min(have, n || 1);
-    if (have - take <= 0) this.bag.delete(ci); else this.bag.set(ci, have - take);
-    return take;
+  Game.prototype.bagCount = function (ci) {
+    let n = 0; for (const b of this.tray) if (b.ci === ci) n++; return n;
   };
-  Game.prototype.bagCount = function (ci) { return this.bag.get(ci) || 0; };
-  Game.prototype.bagTotal = function () {
-    let t = 0; for (const v of this.bag.values()) t += v; return t;
-  };
+  Game.prototype.bagTotal = function () { return this.tray.length; };
 
   // ---- cell mutators (driven by animations) --------------------------------
   Game.prototype.liftCell = function (i) {        // remove bead, return its color

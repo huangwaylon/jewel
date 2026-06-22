@@ -5,7 +5,8 @@
   'use strict';
   const C = App.color;
 
-  const PAD = 14, GAP = 14, TRAY_H = 104;
+  const PAD = 14, GAP = 14, TRAY_H = 150;
+  const TRAY_ROWS = 3, TRAY_COLS = 9, TRAY_INSET = 12;
 
   function Stage(canvas, game) {
     this.cv = canvas;
@@ -49,17 +50,29 @@
     this.cell = board / this.game.size;
     this.beadR = this.cell * 0.42;
     this.tray = { x: PAD, y: top + board + GAP, w: W - 2 * PAD, h: TRAY_H };
+
+    // Fixed 3-row grid of slots inside the tray.
+    const innerW = this.tray.w - 2 * TRAY_INSET, innerH = this.tray.h - 2 * TRAY_INSET;
+    this.slotW = innerW / TRAY_COLS;
+    this.slotH = innerH / TRAY_ROWS;
+    this.traySlotR = Math.min(this.slotW, this.slotH) * 0.40;
+    this.trayCap = TRAY_ROWS * TRAY_COLS;
+    if (this.game) this.game.trayCap = this.trayCap;
+  };
+
+  // Center of tray slot `i` (row-major, 3 rows).
+  Stage.prototype.slotCenter = function (i) {
+    const col = i % TRAY_COLS, row = Math.floor(i / TRAY_COLS);
+    return {
+      x: this.tray.x + TRAY_INSET + this.slotW * (col + 0.5),
+      y: this.tray.y + TRAY_INSET + this.slotH * (row + 0.5),
+    };
   };
 
   // ---- geometry -------------------------------------------------------------
   Stage.prototype.cellRect = function (gx, gy) {
     const x = this.bx + gx * this.cell, y = this.by + gy * this.cell;
     return { x, y, w: this.cell, h: this.cell, cx: x + this.cell / 2, cy: y + this.cell / 2 };
-  };
-  Stage.prototype.pilePos = function (ci) {
-    const n = Math.max(1, this.game.palette.length);
-    const slotW = this.tray.w / n;
-    return { x: this.tray.x + slotW * (ci + 0.5), y: this.tray.y + this.tray.h * 0.46, slotW };
   };
   Stage.prototype.hitCell = function (px, py) {
     if (px < this.bx || py < this.by || px > this.bx + this.boardSide || py > this.by + this.boardSide) return null;
@@ -311,31 +324,33 @@
     ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     roundRect(ctx, tr.x, tr.y, tr.w, tr.h, 20); ctx.stroke();
 
-    const total = this.game.bagTotal();
-    if (total === 0) {
-      ctx.fillStyle = 'rgba(255,255,255,0.42)';
-      ctx.font = '600 14px system-ui, sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('Tap a color to scoop beads into your tray', tr.x + tr.w / 2, tr.y + tr.h / 2);
-      return;
+    // Fixed grid of empty slots.
+    for (let i = 0; i < this.trayCap; i++) {
+      const s = this.slotCenter(i);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, this.traySlotR * 0.96, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.stroke();
     }
-    for (let ci = 0; ci < this.game.palette.length; ci++) {
-      const n = this.game.bagCount(ci);
-      if (n <= 0) continue;
-      const p = this.pilePos(ci);
-      const col = this.game.palette[ci];
-      const br = Math.min(this.beadR, 13);
-      // little cluster
-      const offs = [[0, 4], [-7, 0], [7, 0], [0, -5], [-4, -3], [4, -3]];
-      const show = Math.min(6, n);
-      for (let k = show - 1; k >= 0; k--) {
-        this.drawBead(ctx, p.x + offs[k][0], p.y + offs[k][1] - 4, br, col, 1);
-      }
-      // count badge
-      ctx.fillStyle = '#fff';
-      ctx.font = '700 12px system-ui, sans-serif';
+
+    // Real beads in their slots, gliding toward their target slot (reflow).
+    const beads = this.game.tray;
+    for (let i = 0; i < beads.length && i < this.trayCap; i++) {
+      const b = beads[i];
+      const s = this.slotCenter(i);
+      if (b.rx == null) { b.rx = s.x; b.ry = s.y; }
+      else { b.rx += (s.x - b.rx) * 0.30; b.ry += (s.y - b.ry) * 0.30; }
+      this.drawBead(ctx, b.rx, b.ry, this.traySlotR, this.game.palette[b.ci], 1);
+    }
+
+    if (beads.length === 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.34)';
+      ctx.font = '600 13px system-ui, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('×' + n, p.x, p.y + br + 14);
+      ctx.fillText('Tap a color to scoop beads here', tr.x + tr.w / 2, tr.y - GAP / 2 - 1);
     }
   };
 
