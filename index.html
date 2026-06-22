@@ -27,10 +27,12 @@
       </div>
       <div class="topbar-right">
         <canvas id="target-thumb" class="target-thumb" width="44" height="44"></canvas>
+        <button id="photo-btn" class="icon-btn" aria-label="Make a puzzle from a photo">📷</button>
         <button id="mute-btn" class="icon-btn" aria-label="Mute">🔊</button>
         <button id="new-btn" class="icon-btn" aria-label="New puzzle">🔀</button>
       </div>
     </header>
+    <input id="file-input" type="file" accept="image/*" class="visually-hidden" />
 
     <div id="progress-bar"><div id="progress-fill"></div><span id="progress-pct">0%</span></div>
 

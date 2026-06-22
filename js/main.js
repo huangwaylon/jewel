@@ -64,6 +64,7 @@
   let game, stage, sfx;
   let sel = null;       // current selection: {src:'board'|'tray', color, cells?|beads?}
   let levelIdx = 0;
+  let curName = '', curIcon = '';   // current puzzle label (handles custom photos too)
   let won = false;
 
   const $ = (id) => document.getElementById(id);
@@ -80,6 +81,12 @@
     $('mute-btn').addEventListener('click', () => {
       const m = sfx.toggle();
       $('mute-btn').textContent = m ? '🔇' : '🔊';
+    });
+    $('photo-btn').addEventListener('click', () => { sfx.resume(); $('file-input').click(); });
+    $('file-input').addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) loadImageFile(f);
+      e.target.value = '';   // allow re-picking the same file
     });
 
     bindInput(canvas);
@@ -104,8 +111,14 @@
     levelIdx = (idx % LEVELS.length + LEVELS.length) % LEVELS.length;
     const meta = LEVELS[levelIdx];
     const puzzle = meta.kind === 'art' ? meta.a.build() : buildPuzzle(meta.e);
+    startPuzzle(puzzle, meta.name, meta.icon);
+  }
+
+  // Start a game from any puzzle (built-in level or a custom photo).
+  function startPuzzle(puzzle, name, icon) {
     won = false;
     hideWin();
+    curName = name; curIcon = icon;
 
     game = new App.Game(puzzle);
     game.scramble();
@@ -120,10 +133,34 @@
       stage.resize();
     }
 
-    $('level-name').textContent = meta.name;
-    $('level-emoji').textContent = meta.icon;
+    $('level-name').textContent = name;
+    $('level-emoji').textContent = icon;
     drawThumb(puzzle);
     updateHUD();
+  }
+
+  // Build a puzzle from a photo the user picks from their library/camera.
+  async function loadImageFile(file) {
+    try {
+      let src = null;
+      if (window.createImageBitmap) {
+        src = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file)).catch(() => null);
+      }
+      if (!src) {
+        src = await new Promise((res, rej) => {
+          const img = new Image();
+          img.onload = () => res(img);
+          img.onerror = rej;
+          img.src = URL.createObjectURL(file);
+        });
+      }
+      const puzzle = App.pixelizeImage(src, { size: GRID, colors: 10 });
+      if (src.close) src.close();
+      if (!puzzle) return;
+      startPuzzle(puzzle, 'Your Photo', '🖼️');
+    } catch (err) {
+      console.warn('Could not build a puzzle from that image:', err);
+    }
   }
 
   function nextLevel() { loadLevel(levelIdx + 1); }
@@ -354,8 +391,8 @@
   }
 
   function showWin() {
-    $('win-emoji').textContent = LEVELS[levelIdx].icon;
-    $('win-name').textContent = LEVELS[levelIdx].name;
+    $('win-emoji').textContent = curIcon;
+    $('win-name').textContent = curName;
     $('win-overlay').classList.add('show');
   }
   function hideWin() { $('win-overlay').classList.remove('show'); }

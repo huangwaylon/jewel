@@ -1,35 +1,59 @@
-/* pixelize.js — turn an emoji glyph into a small quantized pixel grid.
-   Fully client-side: render the emoji to a canvas, downsample to a grid,
-   then median-cut the cell colors into a tidy palette. */
+/* pixelize.js — turn an emoji glyph OR a user photo into a small quantized
+   pixel grid. Fully client-side: render/draw to a canvas, downsample to a grid,
+   median-cut the cell colors into a tidy palette, and cap any single color so
+   the scramble can leave no bead solved.
+   Puzzle shape: { size, palette:[[r,g,b]...], cells:[{gx,gy,on,ci}] } */
 (function (App) {
   'use strict';
   const C = App.color;
+  const MAX_SHARE = 0.46;
+  const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
 
-  // Render `emoji` and return { size, palette:[[r,g,b]...], cells:[{gx,gy,on,ci}] }
+  // ---- emoji → puzzle (few colors, high-contrast spread) -------------------
   function pixelize(emoji, opts) {
     opts = opts || {};
-    const size = opts.size || 16;       // grid is size x size
-    const colors = opts.colors || 5;    // target palette count (<= 5)
-    const SS = 10;                      // supersample pixels per cell
-    const px = size * SS;
-
-    const cv = document.createElement('canvas');
-    cv.width = cv.height = px;
-    const ctx = cv.getContext('2d', { willReadFrequently: true });
-    ctx.clearRect(0, 0, px, px);
-
-    // Draw the emoji as large as possible, centered.
+    const size = opts.size || 16, colors = opts.colors || 5, SS = 10, px = size * SS;
+    const ctx = makeCanvas(px);
     const fontPx = Math.floor(px * 0.84);
     ctx.font = `${fontPx}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",system-ui,sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(emoji, px / 2, px / 2 + px * 0.04);
 
-    const data = ctx.getImageData(0, 0, px, px).data;
+    const { raw, samples } = sampleGrid(ctx, px, size, SS, 0.45);
+    if (!samples.length) return null;
+    return quantize(size, raw, samples, { colors, expand: 2, mergeT: 46, contrast: 'spread' });
+  }
 
-    // Average each grid cell (alpha-weighted), decide on/off by coverage.
-    const raw = [];
-    const samples = [];
+  // ---- photo → puzzle (up to ~10 colors, keep the real look) ---------------
+  function pixelizeImage(source, opts) {
+    opts = opts || {};
+    const size = opts.size || 16, colors = opts.colors || 10, SS = 8, px = size * SS;
+    const ctx = makeCanvas(px);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    // cover-crop the largest centered square of the source
+    const sw = source.width, sh = source.height, side = Math.min(sw, sh);
+    ctx.drawImage(source, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, px, px);
+
+    const { raw, samples } = sampleGrid(ctx, px, size, SS, 0.45);
+    if (!samples.length) return null;
+    return quantize(size, raw, samples, { colors, expand: 0, mergeT: 18, contrast: 'natural' });
+  }
+
+  // ---- shared helpers -------------------------------------------------------
+  function makeCanvas(px) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = px;
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.clearRect(0, 0, px, px);
+    return ctx;
+  }
+
+  // Average each grid cell (alpha-weighted); a cell is "on" if it has coverage.
+  function sampleGrid(ctx, px, size, SS, alphaThresh) {
+    const data = ctx.getImageData(0, 0, px, px).data;
+    const raw = [], samples = [];
     for (let gy = 0; gy < size; gy++) {
       for (let gx = 0; gx < size; gx++) {
         let r = 0, g = 0, b = 0, a = 0;
@@ -41,54 +65,40 @@
           }
         }
         const cover = a / (SS * SS);
-        if (cover > 0.45 && a > 0) {
-          const col = [r / a, g / a, b / a];
-          raw.push({ gx, gy, on: true, color: col });
-          samples.push(col);
+        if (cover > alphaThresh && a > 0) {
+          raw.push({ gx, gy, on: true, color: [r / a, g / a, b / a] });
+          samples.push(raw[raw.length - 1].color);
         } else {
           raw.push({ gx, gy, on: false });
         }
       }
     }
+    return { raw, samples };
+  }
 
-    if (samples.length === 0) return null;
-
-    // Cluster the cell colors, then merge near-identical shades so we spend our
-    // (<=5) color slots on genuinely different colors rather than 5 reds.
-    let centers = C.medianCut(samples, colors + 2);
-    centers = C.mergeSimilar(centers, 46 * 46);   // collapse within ~46/channel
+  function quantize(size, raw, samples, opts) {
+    const colors = opts.colors;
+    let centers = C.medianCut(samples, colors + (opts.expand || 0));
+    centers = C.mergeSimilar(centers, opts.mergeT * opts.mergeT);
     if (centers.length > colors) {
-      // keep the `colors` most populous clusters
       const pop = centers.map(() => 0);
       for (const c of samples) pop[C.nearest(centers, c)]++;
-      centers = centers
-        .map((c, i) => ({ c, n: pop[i] }))
-        .sort((a, b) => b.n - a.n)
-        .slice(0, colors)
-        .map((x) => x.c);
+      centers = centers.map((c, i) => ({ c, n: pop[i] })).sort((a, b) => b.n - a.n)
+        .slice(0, colors).map((x) => x.c);
     }
 
-    // Assign each cell to its nearest ORIGINAL center (keep cell.color around
-    // for the dominance step below).
     for (const cell of raw) if (cell.on) cell.ci = C.nearest(centers, cell.color);
-
-    // Cap any single color to <= MAX_SHARE of the cells, so the scramble can
-    // leave NO bead on its target cell. Split a too-dominant color in two by
-    // brightness, then merge the smallest pair back down to stay within budget.
     capDominance(raw.filter((c) => c.on), centers, MAX_SHARE, colors);
 
-    // Build a high-contrast display palette from just the colors actually used.
     const usedList = [...new Set(raw.filter((c) => c.on).map((c) => c.ci))];
-    const contrast = C.contrastify(usedList.map((ci) => centers[ci]));
+    const usedColors = usedList.map((ci) => centers[ci]);
+    const palette = opts.contrast === 'spread' ? C.contrastify(usedColors) : usedColors.map(C.jewelize);
     const remap = new Map();
     usedList.forEach((ci, k) => remap.set(ci, k));
     for (const cell of raw) if (cell.on) { cell.ci = remap.get(cell.ci); delete cell.color; }
 
-    return { size, palette: contrast, cells: raw };
+    return { size, palette, cells: raw };
   }
-
-  const MAX_SHARE = 0.46;
-  const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
 
   function recompCenter(centers, onCells, ci) {
     let r = 0, g = 0, b = 0, n = 0;
@@ -96,23 +106,24 @@
     if (n > 0) centers[ci] = [r / n, g / n, b / n];
   }
 
+  // Cap any single color to <= maxFrac of cells (so the scramble can leave no
+  // bead on its target). Split a too-dominant color by brightness, then merge
+  // the smallest pair back to stay within the color budget.
   function capDominance(onCells, centers, maxFrac, maxColors) {
     const total = onCells.length;
-    for (let iter = 0; iter < 6; iter++) {
+    for (let iter = 0; iter < 8; iter++) {
       const count = {};
       for (const c of onCells) count[c.ci] = (count[c.ci] || 0) + 1;
       let dom = -1, domN = 0;
       for (const k in count) if (count[k] > domN) { domN = count[k]; dom = +k; }
       if (domN <= maxFrac * total) break;
 
-      // split the dominant cluster in half by brightness
       const grp = onCells.filter((c) => c.ci === dom).sort((a, b) => lum(a.color) - lum(b.color));
       const ni = centers.length; centers.push([0, 0, 0]);
       for (let x = grp.length >> 1; x < grp.length; x++) grp[x].ci = ni;
       recompCenter(centers, onCells, dom);
       recompCenter(centers, onCells, ni);
 
-      // merge smallest pairs to stay within the color budget
       let usedKeys = [...new Set(onCells.map((c) => c.ci))];
       while (usedKeys.length > maxColors) {
         const cnt = {};
@@ -123,7 +134,7 @@
           if (comb < fbest) { fbest = comb; fbi = ka; fbj = kb; }
           if (comb <= maxFrac * total && comb < best) { best = comb; bi = ka; bj = kb; }
         }
-        if (bi < 0) { bi = fbi; bj = fbj; }       // fallback if none stays under cap
+        if (bi < 0) { bi = fbi; bj = fbj; }
         for (const c of onCells) if (c.ci === bj) c.ci = bi;
         recompCenter(centers, onCells, bi);
         usedKeys = [...new Set(onCells.map((c) => c.ci))];
@@ -132,4 +143,5 @@
   }
 
   App.pixelize = pixelize;
+  App.pixelizeImage = pixelizeImage;
 })(window.App = window.App || {});

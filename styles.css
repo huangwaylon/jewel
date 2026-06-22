@@ -61,6 +61,14 @@ html, body {
 }
 .icon-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.16); }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  left: -9999px;
+}
+
 /* ---- progress ---- */
 #progress-bar {
   position: relative;

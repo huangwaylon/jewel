@@ -103,6 +103,8 @@
     const seen = new Set();
     const out = [];
     const stack = [[gx, gy]];
+    // 8-connected: diagonals count as part of the same group / region too.
+    const NB = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
     while (stack.length) {
       const [x, y] = stack.pop();
       const i = this.idx(x, y);
@@ -111,10 +113,9 @@
       const c = this.cells[i];
       if (!c.on || !pred(c)) continue;
       out.push({ gx: x, gy: y, i });
-      if (this.inBounds(x + 1, y)) stack.push([x + 1, y]);
-      if (this.inBounds(x - 1, y)) stack.push([x - 1, y]);
-      if (this.inBounds(x, y + 1)) stack.push([x, y + 1]);
-      if (this.inBounds(x, y - 1)) stack.push([x, y - 1]);
+      for (const [dx, dy] of NB) {
+        if (this.inBounds(x + dx, y + dy)) stack.push([x + dx, y + dy]);
+      }
     }
     return out;
   };
